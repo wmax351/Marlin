@@ -192,7 +192,8 @@ bool probe_deployed = false;
 std::map<string, int> image_cache;
 uint16_t next_available_address = 1;
 static millis_t thumbtime = 0;
-#define THUMB_WAIT 500
+static millis_t name_scroll_time = 0;
+#define SCROLL_WAIT 1000
 #endif
 
 CrealityDWINClass CrealityDWIN;
@@ -541,7 +542,7 @@ void CrealityDWINClass::Redraw_Menu(bool lastprocess/*=true*/, bool lastselectio
       Draw_Print_Screen();
       break;
     case File:
-      Draw_SD_List(false, (lastselection) ? last_selection : 0, (lastselection) ? scrollpos : 0);
+      Draw_SD_List(false, (lastselection) ? last_selection : 0, (lastselection) ? scrollpos : 0, true);
       break;
     default:
       break;
@@ -4814,7 +4815,7 @@ void CrealityDWINClass::Option_Control() {
 #if ENABLED(DWIN_CREALITY_LCD_GCODE_PREVIEW)
 bool CrealityDWINClass::find_and_decode_gcode_preview(char *name, uint8_t preview_type, uint16_t *address, bool onlyCachedFileIcon/*=false*/) {
   // Won't work if we don't copy the name
-  for (char *c = &name[0]; *c; c++) *c = tolower(*c);
+  // for (char *c = &name[0]; *c; c++) *c = tolower(*c);
 
   char file_name[strlen(name) + 1]; // Room for filename and null
   sprintf_P(file_name, "%s", name);
@@ -4848,6 +4849,7 @@ bool CrealityDWINClass::find_and_decode_gcode_preview(char *name, uint8_t previe
     case Thumnail_Preview: strcpy_P(key, "; jpeg thumbnail begin 217x217"); break;
   }
   while(n_reads < 16 && data_read) { // Max 16 passes so we don't loop forever
+  if (Encoder_ReceiveAnalyze() != ENCODER_DIFF_NO) return false;
     encoded_image = strstr(public_buf, key);
     if (encoded_image) {
       uint32_t index_bw = &public_buf[buff_size] - encoded_image;
@@ -4920,7 +4922,7 @@ bool CrealityDWINClass::find_and_decode_gcode_preview(char *name, uint8_t previe
 void CrealityDWINClass::File_Control() {
   ENCODER_DiffState encoder_diffState = Encoder_ReceiveAnalyze();
   static uint8_t filescrl = 0;
-  if (encoder_diffState == ENCODER_DIFF_NO) {
+  if (ELAPSED(millis(), name_scroll_time), encoder_diffState == ENCODER_DIFF_NO) {
     if (selection > 0) {
       card.getfilename_sorted(SD_ORDER(selection-1, card.get_num_Files()));
       char * const filename = card.longest_filename();
@@ -4960,9 +4962,6 @@ void CrealityDWINClass::File_Control() {
     if (selection > 0) {
       DWIN_Draw_Rectangle(1, Color_Bg_Black, LBLX, MBASE(selection-scrollpos) - 14, 271, MBASE(selection-scrollpos) + 28);
       Draw_SD_Item(selection, selection-scrollpos, true);
-      #if ENABLED(DWIN_CREALITY_LCD_GCODE_PREVIEW)
-      thumbtime = millis() + THUMB_WAIT;
-      #endif
     }
     filescrl = 0;
     selection++; // Select Down
@@ -4970,29 +4969,28 @@ void CrealityDWINClass::File_Control() {
       scrollpos++;
       DWIN_Frame_AreaMove(1, 2, MLINE, Color_Bg_Black, 0, 31, DWIN_WIDTH, 349);
       Draw_SD_Item(selection, selection-scrollpos, true);
-      #if ENABLED(DWIN_CREALITY_LCD_GCODE_PREVIEW)
-      thumbtime = millis() + THUMB_WAIT;
-      #endif
     }
+    #if ENABLED(DWIN_CREALITY_LCD_GCODE_PREVIEW)
+    thumbtime = millis() + SCROLL_WAIT;
+    name_scroll_time = millis() + SCROLL_WAIT;
+    #endif
     DWIN_Draw_Rectangle(1, GetColor(eeprom_settings.cursor_color, Rectangle_Color), 0, MBASE(selection-scrollpos) - 18, 8, MBASE(selection-scrollpos) + 31);
   }
   else if (encoder_diffState == ENCODER_DIFF_CCW && selection > 0) {
     DWIN_Draw_Rectangle(1, Color_Bg_Black, 0, MBASE(selection-scrollpos) - 18, 14, MBASE(selection-scrollpos) + 33);
     DWIN_Draw_Rectangle(1, Color_Bg_Black, LBLX, MBASE(selection-scrollpos) - 14, 271, MBASE(selection-scrollpos) + 28);
     Draw_SD_Item(selection, selection-scrollpos, true);
-    #if ENABLED(DWIN_CREALITY_LCD_GCODE_PREVIEW)
-    thumbtime = millis() + THUMB_WAIT;
-    #endif
     filescrl = 0;
     selection--; // Select Up
     if (selection < scrollpos) {
       scrollpos--;
       DWIN_Frame_AreaMove(1, 3, MLINE, Color_Bg_Black, 0, 31, DWIN_WIDTH, 349);
       Draw_SD_Item(selection, selection-scrollpos, true);
-      #if ENABLED(DWIN_CREALITY_LCD_GCODE_PREVIEW)
-      thumbtime = millis() + THUMB_WAIT;
-      #endif
     }
+    #if ENABLED(DWIN_CREALITY_LCD_GCODE_PREVIEW)
+    thumbtime = millis() + SCROLL_WAIT;
+    name_scroll_time = millis() + SCROLL_WAIT;
+    #endif
     DWIN_Draw_Rectangle(1, GetColor(eeprom_settings.cursor_color, Rectangle_Color), 0, MBASE(selection-scrollpos) - 18, 8, MBASE(selection-scrollpos) + 31);
   }
   else if (encoder_diffState == ENCODER_DIFF_ENTER) {
@@ -5481,6 +5479,7 @@ void CrealityDWINClass::Screen_Update() {
       // Draw_SD_List(!mounted, selection, scrollpos);
       if (selection-scrollpos > MROWS) scrollpos = selection - MROWS;
       LOOP_L_N(i, _MIN(card.get_num_Files()+1, TROWS)) {
+        if (Encoder_ReceiveAnalyze() != ENCODER_DIFF_NO) break;
         if (i+scrollpos == 0) {
           if (card.flag.workDirIsRoot)
             Draw_Menu_Item(0, ICON_Back, "Back");
